@@ -53,7 +53,7 @@ long long read_perfevent(int fd) {
 
 int main(int argc, char **argv) {
     int pid;
-    int num_counters = 4; // Number of counters to monitor
+    int num_counters = 6; // Number of counters to monitor
     int fd[10]; // File descriptors for perf events
     long long values[10] = {0};
     long long sum[10] = {0};
@@ -75,6 +75,8 @@ int main(int argc, char **argv) {
         {"L1/L2 TLB miss", PERF_TYPE_RAW, 0x10D},
         {"CPU clock", PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_CLOCK},
         {"CPU migrations", PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_MIGRATIONS},
+        {"node_read_bytes", PERF_TYPE_RAW, 0x10F}, // Node read bytes
+        {"node_write_bytes", PERF_TYPE_RAW, 0x110}  // Node write bytes
         // Add more counters here...
     };
 

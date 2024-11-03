@@ -59,7 +59,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < NUM_EVENTS; i++) {
     retval = PAPI_add_event(EventSet, events[i]);
     if (retval != PAPI_OK) {
-      fprintf(stderr, "Error adding event %s: %s\n", PAPI_event_code_to_name(events[i], event_names[i]), PAPI_strerror(retval));
+      fprintf(stderr, "Error adding event %d: %s\n", PAPI_event_code_to_name(events[i], event_names[i]), PAPI_strerror(retval));
       exit(1);
     }
     PAPI_event_code_to_name(events[i], event_names[i]);
