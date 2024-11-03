@@ -52,6 +52,7 @@ long long read_perfevent(int fd) {
 }
 
 int main(int argc, char **argv) {
+    long long seconds = 5.0; //Number of seconds to monitor
     int pid;
     int num_counters = 6; // Number of counters to monitor
     int fd[10]; // File descriptors for perf events
@@ -114,11 +115,11 @@ int main(int argc, char **argv) {
         elapsed_seconds = (current_time.tv_sec - start_time.tv_sec) +
                           (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
 
-    } while (elapsed_seconds < 5.0);
+    } while (elapsed_seconds < seconds);
 
     // Calculate and print the mean values
     for (int i = 0; i < num_counters; i++) {
-        printf("Mean value for %s: %lld /s\n", counters[i].name, sum[i] / 10); 
+        printf("Mean value for %s: %lld /s\n", counters[i].name, sum[i] / seconds); 
     }
 
     // Disable and close PERF events
