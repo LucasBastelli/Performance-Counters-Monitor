@@ -7,18 +7,20 @@
 #include <unistd.h>
 #include <sys/syscall.h>
 #include <time.h>
+#include <signal.h>
+#include <errno.h>
 
-// Structure to store the PERF event
-struct perf_event_attr attr[10]; // Increased size for more counters
+#define num_counters 6
 
-// Structure to define a performance counter
+struct perf_event_attr attr[10];
+
+// Performance counter structure
 typedef struct {
     char *name;
     int type;
     int config;
 } perf_counter_t;
 
-// Function to configure the PERF event
 void config_perfevent(int pid, int idx, perf_counter_t counter) {
     memset(&attr[idx], 0, sizeof(struct perf_event_attr));
     attr[idx].type = counter.type;
@@ -29,12 +31,10 @@ void config_perfevent(int pid, int idx, perf_counter_t counter) {
     attr[idx].exclude_hv = 0;      
 }
 
-// Wrapper function for perf_event_open syscall
 int perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu, int group_fd, unsigned long flags) {
     return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
 }
 
-// Function to open the PERF event
 int open_perfevent(int pid, int idx) {
     int fd = perf_event_open(&attr[idx], pid, -1, -1, 0);
     if (fd == -1) {
@@ -44,85 +44,87 @@ int open_perfevent(int pid, int idx) {
     return fd;
 }
 
-// Function to read the value of the PERF event
 long long read_perfevent(int fd) {
     long long value;
     read(fd, &value, sizeof(long long));
     return value;
 }
 
-int main(int argc, char **argv) {
-    long long seconds = 5.0; //Number of seconds to monitor
-    int pid;
-    int num_counters = 6; // Number of counters to monitor
-    int fd[10]; // File descriptors for perf events
-    long long values[10] = {0};
-    long long sum[10] = {0};
-    struct timespec start_time, current_time;
-    double elapsed_seconds;
+int is_process_alive(int pid) {
+    return kill(pid, 0) == 0 || errno != ESRCH;
+}
 
-    // Check if PID was provided
-    if (argc < 2) {
-        printf("Usage: %s <PID>\n", argv[0]);
+int main(int argc, char **argv) {
+    int pid;
+    int fd[num_counters];
+    long long values[num_counters] = {0};
+    long long sum[num_counters] = {0};
+    struct timespec start_time, current_time;
+    float elapsed_seconds = 0;
+    float time_space = 0.5;
+    int monitoring_mode = 0; // 0 for time-based, 1 for monitoring until process end
+    float monitor_duration = 0;
+
+    if (argc < 3) {
+        printf("Usage: %s <PID> <mode> [seconds]\n", argv[0]);
+        printf("Modes: time <seconds> or end\n");
         exit(EXIT_FAILURE);
     }
 
-    // Convert PID to integer
     pid = atoi(argv[1]);
 
-    // Define the performance counters
+    if (strcmp(argv[2], "time") == 0) {
+        monitoring_mode = 0;
+        if (argc < 4) {
+            printf("Please specify the number of seconds to monitor.\n");
+            exit(EXIT_FAILURE);
+        }
+        monitor_duration = atof(argv[3]);
+    } else if (strcmp(argv[2], "end") == 0) {
+        monitoring_mode = 1;
+    } else {
+        printf("Invalid mode. Use 'time' or 'end'.\n");
+        exit(EXIT_FAILURE);
+    }
+
     perf_counter_t counters[] = {
         {"CPU cycles", PERF_TYPE_HARDWARE, PERF_COUNT_HW_CPU_CYCLES},
         {"L1/L2 TLB miss", PERF_TYPE_RAW, 0x10D},
         {"CPU clock", PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_CLOCK},
         {"CPU migrations", PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_MIGRATIONS},
-        {"node_read_bytes", PERF_TYPE_RAW, 0x10F}, // Node read bytes
-        {"node_write_bytes", PERF_TYPE_RAW, 0x110}  // Node write bytes
-        // Add more counters here...
+        {"node_read_bytes", PERF_TYPE_RAW, 0x10F},
+        {"node_write_bytes", PERF_TYPE_RAW, 0x110}
     };
 
-    num_counters = sizeof(counters) / sizeof(counters[0]); // Update num_counters
-
-    // Configure PERF events
     for (int i = 0; i < num_counters; i++) {
         config_perfevent(pid, i, counters[i]);
     }
 
-    // Open PERF events
     for (int i = 0; i < num_counters; i++) {
         fd[i] = open_perfevent(pid, i);
     }
 
-    // Enable PERF events
     for (int i = 0; i < num_counters; i++) {
         ioctl(fd[i], PERF_EVENT_IOC_ENABLE, 0);
     }
 
-    // Get start time
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
-
-    // Monitor for 5 seconds, reading values every 0.5 seconds
     do {
-        usleep(500000); // Wait 0.5 seconds
+        usleep(time_space * 1000000); //500000 = 0.5s; 1000000 = 1s
 
         for (int i = 0; i < num_counters; i++) {
             values[i] = read_perfevent(fd[i]);
             sum[i] += values[i];
         }
 
-        // Get current time
-        clock_gettime(CLOCK_MONOTONIC, &current_time);
-        elapsed_seconds = (current_time.tv_sec - start_time.tv_sec) +
-                          (current_time.tv_nsec - start_time.tv_nsec) / 1e9;
+        elapsed_seconds += time_space;
 
-    } while (elapsed_seconds < seconds);
+    } while ((monitoring_mode == 0 && elapsed_seconds < monitor_duration) || //Time mode
+             (monitoring_mode == 1 && is_process_alive(pid))); //Till the program ends
 
-    // Calculate and print the mean values
     for (int i = 0; i < num_counters; i++) {
-        printf("Mean value for %s: %lld /s\n", counters[i].name, sum[i] / seconds); 
+        printf("Mean value for %s: %.2f /s\n", counters[i].name, (sum[i] / elapsed_seconds)); 
     }
 
-    // Disable and close PERF events
     for (int i = 0; i < num_counters; i++) {
         ioctl(fd[i], PERF_EVENT_IOC_DISABLE, 0);
         close(fd[i]);
